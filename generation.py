@@ -8,6 +8,7 @@ class createOrder:
         self.nsmap = nsmap
         self.url = url
         self.access_token = ''
+        self.dispatcher = {"Provide": self.replaceAll, "Change-Owner": self.changeOwner}
 
     def submitOrder(self, url, user = 'admin', password = 'welcome1'):
 
@@ -301,6 +302,29 @@ class createOrder:
 
         dominantOrderItemReplace(self, old_OIRefs)
 
+    def changeOwner(self):
+        action_codes = self.root.xpath("//a:action/a:code", namespaces = self.nsmap)
+        type_codes = self.root.xpath("//a:type/a:code", namespaces = self.nsmap)
+
+        if len(action_codes) and len(type_codes):
+            oldAction = action_codes[0].text
+            oldTypes = type_codes[0].text
+            
+
+            for element in action_codes:
+                element.text = "CH"
+            print(f"Action Codes changed from {oldAction} to {action_codes[0].text}")
+
+            for element in type_codes:
+                element.text = "CW"
+            print(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
+
+            self.orderIdReplace()
+            self.cbpReplace()
+            
+            # print(action_codes)
+            # print(type_codes)
+
     def replaceAll(self):
         self.orderIdReplace()
         self.samkeyReplace()
@@ -313,39 +337,13 @@ class createOrder:
         self.orderItemIdReplace()
         print("\nValues Replaced!")
 
-def main():
-    # TODO Check if I need to change the initial product order id and external id
-    # TODO Give some directions on script startup (ex. explain the input and output filename command line arguments)
-    outputFn = ""
-    fp = ""
+def writeToFile(outputFn, order: createOrder):
+        
+    with open("%s.xml" % outputFn, 'wb') as file:
+        print(f"\nOutput Filename: {outputFn}.xml")
+        file.write(etree.tostring(order.root))
 
-    if len(sys.argv) > 1:
-        fp = sys.argv[1]
-        print(f"\nFile Path: {fp}\n")
-        root = etree.parse(fp)
-        nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
-        url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
-        user = "admin"
-        password = "welcome1"
-        order = createOrder(root, nsmap, url, user, password)
-        outputFn = order.getOutputFilename()
-
-        if len(sys.argv) > 2:
-            outputFn = sys.argv[2]
-    
-        if os.path.exists(fp):
-                filename = os.path.basename(fp)
-
-                # order.replaceAll()                
-                with open("%s.xml" % outputFn, 'wb') as file:
-                    order.replaceAll()
-                    print(f"\nOutput Filename: {outputFn}.xml")
-                    file.write(etree.tostring(order.root))
-
-    else:
-        print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)")
-
-def outputFileRun(credentials, outputFn = ''):
+def outputFileRun(credentials, orderType, outputFn = ''):
     nsmap = credentials[0]
     url = credentials[1]
     user = credentials[2]
@@ -364,17 +362,26 @@ def outputFileRun(credentials, outputFn = ''):
         order = createOrder(root, nsmap, url, user, password)
         
         if len(outputFn) == 0:
-            outputFn = order.getOutputFilename()
+            outputFn = order.getOutputFilename() + "_" + "Provide"
 
-        with open("%s.xml" % outputFn, 'wb') as file:
-            order.replaceAll()
-            print(f"\nOutput Filename: {outputFn}.xml")
-            file.write(etree.tostring(order.root))
+        # Create provide order
+        order.replaceAll()
+        writeToFile(outputFn, order)
+        
+        if orderType != "Provide":
+            outputFn = order.getOutputFilename() + "_" + orderType
+            # Create second order
+            order.dispatcher[orderType]()
+            
+            writeToFile(outputFn, order)
+            with open("%s.xml" % outputFn, 'wb') as file:
+                print(f"\nOutput Filename: {outputFn}.xml")
+                file.write(etree.tostring(order.root))
 
     else:
        print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)") 
 
-def submitRun(credentials):
+def submitRun(credentials) -> createOrder:
     nsmap = credentials[0]
     url = credentials[1]
     user = credentials[2]
@@ -394,6 +401,7 @@ def submitRun(credentials):
         order.replaceAll()
         order.submitOrder(url)
 
+    return order
 
 def menu(options, firstCall = False):
     
@@ -414,7 +422,7 @@ def ensureValidChoice(message, acceptRange) -> int:
             val = int(userInput)
 
         except ValueError:
-            print("Not a number")
+            print("\nNot a number")
         
         else:
             if val in range(acceptRange + 1):
@@ -431,6 +439,7 @@ def options():
     password = "welcome1"
 
     credentials = [nsmap, url, user, password]
+    types = {1: "Provide", 2: "Change-Owner"}
 
 
     choices = ["Singular", "Multiple"]
@@ -440,7 +449,12 @@ def options():
     while pick != 0:
         # print("In while")
         if pick == 1:
-            choices = ["Output File", "Submit"]
+            choices = ["Provide", "Change-Owneer"]
+            menu(choices)
+            orderTypeChoice = ensureValidChoice("What type of order?: ", len(choices))
+            orderType = types[orderTypeChoice]
+
+            choices = ["Output File(s)", "Submit"]
             menu(choices)
             ans = ensureValidChoice("Produce output file or submit the order?: ", len(choices))
 
@@ -448,11 +462,18 @@ def options():
                 filename = str(input("Enter Output Filename (Leave blank for generated filename or 0 to exit): "))
                 if filename == "0":
                     continue
-                outputFileRun(credentials, filename)
+
+                outputFileRun(credentials, orderType, filename)
                 break
 
             elif ans == 2:
-                submitRun(credentials)
+                order: createOrder = submitRun(credentials)
+                if orderType != "Provide":
+                    print("\n==================================================")
+                    print("Secondary order will be written to file")
+                    outputFn = order.getOutputFilename()
+                    order.dispatcher[orderType]()
+                    writeToFile(outputFn, order)
                 break
 
         elif pick == 2:
@@ -474,17 +495,20 @@ def options():
 
 
 def testing():
-    # root = etree.parse("new_order.xml")
-    # nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
-    # url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
-    # user = "admin"
-    # password = "welcome1"
-    # order = createOrder(root, nsmap, url, user, password)
-    # order.submitOrder(url)
-    # order.id_generator(12, isMac=True)
-    # order.affectedProductReplace()
-    options()
+    root = etree.parse("new_order.xml")
+    nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
+    url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
+    user = "admin"
+    password = "welcome1"
+    order = createOrder(root, nsmap, url, user, password)
 
-# main()
+    order.changeOwner()
+
+    # outputFn = order.getOutputFilename()
+
+    # with open("%s.xml" % outputFn, 'wb') as file:
+    #     print(f"\nOutput Filename: {outputFn}.xml")
+    #     file.write(etree.tostring(order.root))
+
 # testing()
 options()
