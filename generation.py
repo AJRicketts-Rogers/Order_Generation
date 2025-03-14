@@ -1,40 +1,60 @@
 from lxml import etree
 from random import randint, choice
-import string
-import requests
-
-# TODO MAKE THIS WHOLE PROGRAM A CLASS TO MAKE IT EASIER / CLEANER TO PASS AROUND THE ROOT NODE
+import string, requests, sys, datetime, os, base64, time
 
 class createOrder:
-    def __init__(self, root, nsmap):
+    def __init__(self, root, nsmap, url, user, password):
         self.root = root
         self.nsmap = nsmap
+        self.url = url
+        self.access_token = ''
 
-    def submitOrder(self, url, order, username = 'admin', password = 'welcome1'):
-        # FIX THIS FUNCTION LATER MAYBE
-        url="http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
-        #headers = {'content-type': 'application/soap+xml'}
-        headers = {'content-type': 'text/xml'}
+    def submitOrder(self, url, user = 'admin', password = 'welcome1'):
+
+        authStr = base64.b64encode((user + ':' + password).encode('ascii'))
+        headers = {'Authorization': 'Basic ' + authStr.decode('ascii'), 'Content-Type': 'application/soap+xml'}
+        
         body = f"""
                 <soapenv:Envelope xmlns:techord="http://xmlns.oracle.com/EnterpriseObjects/Core/EBO/TechnicalOrder/V1" xmlns:corecom="http://xmlns.oracle.com/EnterpriseObjects/Core/Common/V2" xmlns:ebo="http://xmlns.oracle.com/EnterpriseObjects/Core/EBO/TechnicalOrder/V1" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:ws="http://xmlns.oracle.com/communications/ordermanagement" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
                     <soapenv:Header>
                         <wsse:Security>
                             <wsse:UsernameToken>
-                                <wsse:Username>{username}</wsse:Username>
+                                <wsse:Username>{user}</wsse:Username>
                                 <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">{password}</wsse:Password>
                             </wsse:UsernameToken>
                         </wsse:Security>
                     </soapenv:Header>
                     <soapenv:Body>
                         <ws:CreateOrder>
-                            {order}
+                            {etree.tostring(self.root, encoding='unicode')}
                         </ws:CreateOrder>
                     </soapenv:Body>
                 </soapenv:Envelope>
         """
 
-        response = requests.post(url,data=body,headers=headers)
-        print(response.content)
+        try:
+            print("\nAttempting to submit the order.....")
+            response = requests.post(url,data=body,headers=headers)
+
+        except requests.exceptions.RequestException as e:
+            print("\nError:")
+            raise SystemExit(e)
+        
+        else:
+            response_map = {'env': 'http://schemas.xmlsoap.org/soap/envelope/', 'n1': 'http://xmlns.oracle.com/communications/ordermanagement'}
+            
+            success_response = etree.fromstring(response.text).xpath("//env:Envelope/env:Body//n1:Reference", namespaces = response_map)
+
+            if len(success_response):
+                print(f"\n\nOrder Submitted!\nReference Number: {success_response[0].text}")
+
+            else:
+                print("Error submitting order and getting reference number, check reposnse output.")
+
+
+    def getOutputFilename(self):
+        curTime = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S%f')
+        return f'order_{curTime}' # Change filename here.
 
     def prettyprint(self, elements, **kwargs):
         for element in elements:
@@ -49,17 +69,22 @@ class createOrder:
 
         return randint(range_start, range_end)
 
-    def id_generator(self, size, chars = string.ascii_uppercase + string.digits):
+    def id_generator(self, size, chars = string.ascii_uppercase + string.digits, isMac = False):
         # Check the requirements for serial number and mac address formatting
-        return ''.join(choice(chars) for _ in range(size))
+        # Use Hexadecimal ONLY
+        if isMac:
+            valid = "ABCDEF123456789"
+            return ''.join(choice(valid) for _ in range(12))
+        else:
+            return ''.join(choice(chars) for _ in range(size))
 
-    def replace(self, elements, length) -> None:
+    def replace(self, elements, length, elementName) -> None:
 
         # Look at the first elements text, check if the first character is numeric (is a number), if so True, else False
         ishhid = False if elements[0].text[:1].isnumeric() else True
         count = 0
 
-        print("Old value: ", elements[0].text)
+        print(f"Old {elementName} value: {elements[0].text}")
         if ishhid:
             cbp = self.getCBP()
             length -= len(cbp)
@@ -75,7 +100,7 @@ class createOrder:
                 element.text = str(new_value)
                 count += 1
 
-        print("New value: ", elements[0].text)
+        print(f"New {elementName} value: {elements[0].text}")
         print("Number of values changed: ", count)
         print("\n")
         
@@ -92,7 +117,7 @@ class createOrder:
 
             order_ids = self.retrieveValues(rbt_characteristics)
 
-            self.replace(order_ids, len(old_orderId))
+            self.replace(order_ids, len(old_orderId), "OrderID")
         
         
     def retrieveValues(self, parent) -> list:
@@ -107,7 +132,7 @@ class createOrder:
                                 + "| //a:characteristicValues[a:name[text()='SamKey'] and a:value[normalize-space() != '']]", namespaces = self.nsmap)
         if len(samKey_parent):
             samkeys = self.retrieveValues(samKey_parent)
-            self.replace(samkeys, len(samkeys[0].text))
+            self.replace(samkeys, len(samkeys[0].text), "SamKey")
 
 
     def cbpReplace(self) -> None:
@@ -117,7 +142,7 @@ class createOrder:
 
         if len(cbp_parent):
             old_cbp = cbp_parent[0].text
-            self.replace(cbp_parent, len(old_cbp))
+            self.replace(cbp_parent, len(old_cbp), "CBP")
         
 
     def workIdReplace(self) -> None:
@@ -125,7 +150,7 @@ class createOrder:
         if len(workId_parent):
             workIds = self.retrieveValues(workId_parent)
             old_workId = workIds[0].text
-            self.replace(workIds, len(old_workId))
+            self.replace(workIds, len(old_workId), "WorkOrderId")
 
     def hhidReplace(self) -> None:
         # Always call after cbp has already been replaced with new value
@@ -133,13 +158,14 @@ class createOrder:
         if len(hhid_parent):
             hhids = self.retrieveValues(hhid_parent)
             old_hhid = hhids[0].text
-            self.replace(hhids, len(old_hhid) - 1) # Subtract 1 from the length for letter at the beginning
+            self.replace(hhids, len(old_hhid) - 1, "HHID") # Subtract 1 from the length for letter at the beginning
 
-    def serialAndMacReplace(self) -> None:
+    def serialReplace(self) -> None:
         # Do I need to change all these mac addresses?
-        serial_parent = self.root.xpath("//a:characteristicValues[a:name[text()='Serial_Number' or contains(text(), ('MAC_Address')) or contains(text(), ('Mac_Address'))]" 
-                                        + " and a:value[normalize-space() != '']]", namespaces = self.nsmap)
+        serial_parent = self.root.xpath("//a:characteristicValues[a:name[text()='Serial_Number'] and a:value[normalize-space() != '']]", namespaces = self.nsmap)
         count = 0
+
+        print("========== Serial Number Replacement ==========")
 
         # self.prettyprint(serial_parent)
         if len(serial_parent):
@@ -159,31 +185,60 @@ class createOrder:
                 
                 print("New value: ", serial_number.text)
 
-            print("Number of values changed: ", count)
-            print("\n")
+            print(f"Number of values changed: {count}\n")
+
+    def macAddressReplace(self) -> None:
+        mac_parent = self.root.xpath("//a:characteristicValues[a:name[contains(text(), ('MAC_Address')) or contains(text(), ('Mac_Address'))]" 
+                                + " and a:value[normalize-space() != '']]", namespaces = self.nsmap)
+        count = 0
+
+        print("========== Mac Address Replacement ==========")
+
+        if len(mac_parent):
+            vals_to_change = []
+
+            for element in mac_parent:
+                vals_to_change.append(element.xpath("./a:name", namespaces = self.nsmap)[0].text)
+
+            print(f"Element Values to Change: {vals_to_change}\n")
+
+            mac_addresses = self.retrieveValues(mac_parent)
+
+            for mac_address in mac_addresses:
+                length = len(mac_address.text)
+                print("Old Mac value: ", mac_address.text)
+                mac_address.text = self.id_generator(length, isMac=True) # If the value is 'NA' replace?
+                count += 1
+                
+                print("New Mac value: ", mac_address.text)
+
+            print(f"Number of values changed: {count}\n")
 
     def affectedProductReplace(self) -> None:
+        # TODO FUTURE FUNCTIONALITY Change all REF_AP's and roleRecievers as well
         # Do I need to replace roleReceiver as well?
         # What about REF_AP_ID??
 
         ap_parent = self.root.xpath("//a:affectedProduct", namespaces = self.nsmap)
+        print("========== Affected Product ID Replacement ==========\n")
 
         # Change both affected product id and APID value to the same number for each affectd product
         for element in ap_parent:
             id = element.xpath("./a:ID", namespaces = self.nsmap)
             ap_id = element.xpath("./a:characteristicValues[a:name[text()='APID']]", namespaces = self.nsmap)
-            
+
             if len(id) and len(ap_id):
                 new_id = self.numberGen(len(id[0].text))
-                print(f"Old id: {id[0].text}")
+                print(f"Old Affected Product id: {id[0].text}")
                 id[0].text = str(new_id)
-                ap_id[0].text = str(new_id)
-                print(f"New id: {new_id}\n")
+                ap_id_value = self.retrieveValues(ap_id)[0]
+                ap_id_value.text = str(new_id)
+                print(f"New Affected Product id: {new_id}\n")
 
 
     def orderItemIdReplace(self):
         # TODO Figure out the correct format for reference numbers (9 Numbers and then a Letter?)
-
+        print("========== Order Item Reference Number Replacement ==========")
         orderItems = self.root.xpath("//a:orderItems", namespaces = self.nsmap)
         old_OIRefs = {}
         if len(orderItems):
@@ -219,11 +274,9 @@ class createOrder:
                     print("ERROR, Could not find order item reference number for the current order item, check order xml formatting.")
     
         def dominantOrderItemReplace(self, matches):
-            # Need to get Associated OA IDs and change those and 
             associated_ids = self.root.xpath("//a:RBTCharacteristics[a:name[text()='Associated_OA_ID'] and a:value[normalize-space() != '']]", namespaces = self.nsmap)
             dominant_id_keys = self.root.xpath("//a:dominantOrderItem/a:externalID/a:key", namespaces = self.nsmap)
-            # print(dominant_id_keys)
-            # print(matches)
+
             if len(associated_ids):
                 for element in associated_ids:
                     value = element.xpath("./a:value", namespaces = self.nsmap)[0] # Will never be empty because of above query
@@ -254,24 +307,184 @@ class createOrder:
         self.cbpReplace()
         self.workIdReplace()
         self.hhidReplace()
-        self.serialAndMacReplace()
+        self.serialReplace()
+        self.macAddressReplace()
         self.affectedProductReplace()
         self.orderItemIdReplace()
-        print("\nSuccess!!")
+        print("\nValues Replaced!")
 
 def main():
+    # TODO Check if I need to change the initial product order id and external id
+    # TODO Give some directions on script startup (ex. explain the input and output filename command line arguments)
+    outputFn = ""
+    fp = ""
 
-    root = etree.parse("big_order_test.xml")
-    nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
-    order = createOrder(root, nsmap)
+    if len(sys.argv) > 1:
+        fp = sys.argv[1]
+        print(f"\nFile Path: {fp}\n")
+        root = etree.parse(fp)
+        nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
+        url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
+        user = "admin"
+        password = "welcome1"
+        order = createOrder(root, nsmap, url, user, password)
+        outputFn = order.getOutputFilename()
 
-    with open("diy_child_new.xml", 'wb') as file:
-        order.replaceAll()
-        file.write(etree.tostring(order.root))
-        # order.dominantOrderItemReplace()
+        if len(sys.argv) > 2:
+            outputFn = sys.argv[2]
+    
+        if os.path.exists(fp):
+                filename = os.path.basename(fp)
+
+                # order.replaceAll()                
+                with open("%s.xml" % outputFn, 'wb') as file:
+                    order.replaceAll()
+                    print(f"\nOutput Filename: {outputFn}.xml")
+                    file.write(etree.tostring(order.root))
+
+    else:
+        print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)")
+
+def outputFileRun(credentials, outputFn = ''):
+    nsmap = credentials[0]
+    url = credentials[1]
+    user = credentials[2]
+    password = credentials[3]
+
+    if len(sys.argv) > 1:
+        fp = sys.argv[1]
+        print(f"\nFile Path: {fp}\n")
         
-        # for element in order.orderItemIdReplace():
-        #     file.write(etree.tostring(element))
-            
+        try:
+            root = etree.parse(fp)
+        except:
+            print("Error parsing file. Check filename")
+            return
+        
+        order = createOrder(root, nsmap, url, user, password)
+        
+        if len(outputFn) == 0:
+            outputFn = order.getOutputFilename()
 
-main()
+        with open("%s.xml" % outputFn, 'wb') as file:
+            order.replaceAll()
+            print(f"\nOutput Filename: {outputFn}.xml")
+            file.write(etree.tostring(order.root))
+
+    else:
+       print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)") 
+
+def submitRun(credentials):
+    nsmap = credentials[0]
+    url = credentials[1]
+    user = credentials[2]
+    password = credentials[3]
+
+    if len(sys.argv) > 1:
+        fp = sys.argv[1]
+        print(f"\nFile Path: {fp}\n")
+        
+        try:
+            root = etree.parse(fp)
+        except:
+            print("Error parsing file. Check filename")
+            return
+        
+        order = createOrder(root, nsmap, url, user, password)
+        order.replaceAll()
+        order.submitOrder(url)
+
+
+def menu(options, firstCall = False):
+    
+    time.sleep(0.4)
+    print("\n==================================================")
+    for index, option in enumerate(options, start=1):
+        print(f"[{index}] {option}")
+
+    exit_message = "[0] Exit" if firstCall else "[0] Back"
+    print(exit_message)
+
+def ensureValidChoice(message, acceptRange) -> int:
+    while True:
+        try:
+            print(message)
+            print("==================================================")
+            userInput = input(">> ")
+            val = int(userInput)
+
+        except ValueError:
+            print("Not a number")
+        
+        else:
+            if val in range(acceptRange + 1):
+                return val
+            else:
+                print("Not a valid choice!")
+
+
+def options():
+
+    nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
+    url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
+    user = "admin"
+    password = "welcome1"
+
+    credentials = [nsmap, url, user, password]
+
+
+    choices = ["Singular", "Multiple"]
+    menu(choices, firstCall=True)
+    pick = ensureValidChoice("Singular or Multiple Orders?: ", len(choices))
+
+    while pick != 0:
+        # print("In while")
+        if pick == 1:
+            choices = ["Output File", "Submit"]
+            menu(choices)
+            ans = ensureValidChoice("Produce output file or submit the order?: ", len(choices))
+
+            if ans == 1:
+                filename = str(input("Enter Output Filename (Leave blank for generated filename or 0 to exit): "))
+                if filename == "0":
+                    continue
+                outputFileRun(credentials, filename)
+                break
+
+            elif ans == 2:
+                submitRun(credentials)
+                break
+
+        elif pick == 2:
+            try: 
+                numOrders = int(input("Number of orders?: "))
+            except ValueError:
+                print("Not a number")
+            else:
+                
+                for i in range(numOrders):
+                    outputFileRun(credentials)
+                break
+        
+        choices = ["Singular", "Multiple"]
+        menu(choices, firstCall=True)
+        pick = ensureValidChoice("How many orders do you need?: ", len(choices))
+    
+    return                
+
+
+def testing():
+    # root = etree.parse("new_order.xml")
+    # nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
+    # url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
+    # user = "admin"
+    # password = "welcome1"
+    # order = createOrder(root, nsmap, url, user, password)
+    # order.submitOrder(url)
+    # order.id_generator(12, isMac=True)
+    # order.affectedProductReplace()
+    options()
+
+# main()
+# testing()
+options()
