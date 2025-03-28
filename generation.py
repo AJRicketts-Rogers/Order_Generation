@@ -1,6 +1,6 @@
 from lxml import etree
 from random import randint, choice
-import string, requests, sys, datetime, os, base64, time
+import string, requests, sys, datetime, os, base64, time, copy
 
 class createOrder:
     def __init__(self, root, nsmap, url, user, password):
@@ -8,7 +8,7 @@ class createOrder:
         self.nsmap = nsmap
         self.url = url
         self.access_token = ''
-        self.dispatcher = {"Provide": self.replaceAll, "Change-Owner": self.changeOwner}
+        self.dispatcher = {"Provide": self.replaceAll, "Change-Owner": self.changeOwner, "Cease": self.cease, "Move (All)": self.moveAll, "Move (Select)": self.moveSelect}
 
     def submitOrder(self, url, user = 'admin', password = 'welcome1'):
 
@@ -215,12 +215,12 @@ class createOrder:
 
             print(f"Number of values changed: {count}\n")
 
-    def affectedProductReplace(self) -> None:
+    def affectedProductReplace(self, start_element) -> None:
         # TODO FUTURE FUNCTIONALITY Change all REF_AP's and roleRecievers as well
         # Do I need to replace roleReceiver as well?
         # What about REF_AP_ID??
 
-        ap_parent = self.root.xpath("//a:affectedProduct", namespaces = self.nsmap)
+        ap_parent = start_element.xpath(".//a:affectedProduct", namespaces = self.nsmap)
         print("========== Affected Product ID Replacement ==========\n")
 
         # Change both affected product id and APID value to the same number for each affectd product
@@ -302,28 +302,124 @@ class createOrder:
 
         dominantOrderItemReplace(self, old_OIRefs)
 
+    def provide(self):
+            self.changeOrderType(self.root, action = "PR", type = "PR")
+            self.replaceAll()
+
     def changeOwner(self):
-        action_codes = self.root.xpath("//a:action/a:code", namespaces = self.nsmap)
-        type_codes = self.root.xpath("//a:type/a:code", namespaces = self.nsmap)
-
-        if len(action_codes) and len(type_codes):
-            oldAction = action_codes[0].text
-            oldTypes = type_codes[0].text
-            
-
-            for element in action_codes:
-                element.text = "CH"
-            print(f"Action Codes changed from {oldAction} to {action_codes[0].text}")
-
-            for element in type_codes:
-                element.text = "CW"
-            print(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
-
+            self.changeOrderType(self.root, action = "CH", type = "CW") 
             self.orderIdReplace()
             self.cbpReplace()
+
+    def cease(self):
+        self.changeOrderType(self.root, action = "CE", type = "CE")
+        self.orderIdReplace()
+        self.cbpReplace()
+
+    def moveAll(self):
+        print("========== Move Scenario ==========\n")
+        self.changeOrderType(self.root, action = "CM", type = "CM")
+        order_items = self.root.xpath("//a:ProductOrder/a:orderItems", namespaces = self.nsmap)
+
+        for element in order_items:
+            new_element = copy.deepcopy(element)
+            self.changeOrderType(new_element, action="PV", type="PV")
+            self.affectedProductReplace(new_element)
+            element.addnext(new_element)
+        
+    
+    def moveSelect(self):
+        self.changeOrderType(self.root, action = "CM", type = "CM")
+
+        order_items = self.root.xpath("//a:ProductOrder/a:orderItems", namespaces = self.nsmap)
+        print("========== Move Scenario ==========\n")
+        # print(order_items)
+        line_item_elements = {}
+        line_item_names = {}
+        index = 0
+        for element in order_items:
+            ap_parent = element.xpath(".//a:affectedProduct/a:productSpec/a:code | .//affectedProduct/a:children/a:affectedProduct/a:productSpec/a:code", namespaces = self.nsmap)
+            # print(ap_parent)
+            if len(ap_parent):
+                for elem in ap_parent:
+                    line_item_elements[elem.text] = elem
+                    line_item_names[index] = elem.text
+                    index += 1
+
+        # Modified menu()
+        time.sleep(0.4)
+        print("\n==================================================")
+        for index in line_item_names.keys():
+            print(f"[{index + 1}] {line_item_names[index]}")
+
+        exit_message = "[0] Back\n"
+        print(exit_message)
+
+        print("Which line items would you like to include in the move?")
+        message = "For all, leave blank. For specific items type each item number with a space i.e 1 2 3"
+        items_to_move = ensureValidChoiceMultiple(message, len(line_item_names))
+        selection = []
+
+        if items_to_move == "":
+            for element in line_item_elements.values():
+                selection = element
+        elif 0 in items_to_move:
+            print("they want to go back")
+        else:
+            for index in items_to_move:
+                # line_items_elements is a key value pair of line item names (strings) as keys and <Element> objects as values
+                # line_item_names is a key value pair of indexes (The numbers shown to the user) as keys and line item names (strings as values)
+                # This will use the index the user selected to find the correct line item names and use that name to find the correct element
+                selection.append(line_item_names[index])
+        
+        # print(selection)
+        # Change both affected product id and APID value to the same number for each affectd product
+        for name in selection:
+            xpath_string = f"//a:affectedProduct[a:productSpec/a:code[text()='{name}']]"
+            print(xpath_string)
+            affected_product = self.root.xpath(xpath_string, namespaces = self.nsmap)
+            if len(affected_product):
+                parent = affected_product[0].xpath("..", namespaces = self.nsmap)
+
+                id = affected_product[0].xpath("./a:ID", namespaces = self.nsmap)
+                ap_id = affected_product[0].xpath("./a:characteristicValues[a:name[text()='APID']]", namespaces = self.nsmap)
+                action = affected_product[0].xpath(".//")
+
+                if len(id) and len(ap_id):
+                    new_id = self.numberGen(len(id[0].text))
+                    print(f"Old Affected Product id: {id[0].text}")
+                    id[0].text = str(new_id)
+                    ap_id_value = self.retrieveValues(ap_id)[0]
+                    ap_id_value.text = str(new_id)
+                    print(f"New Affected Product id: {new_id}\n")
+
+    
+    def changeActionCodes(self, element, action:string):
+        action_codes = element.xpath(".//a:action/a:code", namespaces = self.nsmap)
+        actions = set()
+        if len(action_codes):
+            oldAction = action_codes[0].text
             
-            # print(action_codes)
-            # print(type_codes)
+            for element in action_codes:
+                actions.add(element.text)
+                print(element.text)
+                element.text = action
+            print(f"Action Codes changed from {actions} to {action_codes[0].text}")
+
+    def changeTypeCodes(self, element, type:string):
+        type_codes = element.xpath(".//a:type/a:code", namespaces = self.nsmap)
+        if len(type_codes):
+            oldTypes = type_codes[0].text
+
+            for element in type_codes:
+                element.text = type
+            print(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
+
+    def changeOrderType(self, element, action : string, type : string):
+        self.changeActionCodes(element, action)
+        self.changeTypeCodes(element, type)
+
+
 
     def replaceAll(self):
         self.orderIdReplace()
@@ -333,8 +429,9 @@ class createOrder:
         self.hhidReplace()
         self.serialReplace()
         self.macAddressReplace()
-        self.affectedProductReplace()
+        self.affectedProductReplace(self.root)
         self.orderItemIdReplace()
+        # self.provide()
         print("\nValues Replaced!")
 
 def writeToFile(outputFn, order: createOrder):
@@ -344,23 +441,21 @@ def writeToFile(outputFn, order: createOrder):
         file.write(etree.tostring(order.root))
 
 def outputFileRun(credentials, orderType, outputFn = ''):
-    nsmap = credentials[0]
-    url = credentials[1]
-    user = credentials[2]
-    password = credentials[3]
+    fp = credentials[0]
+    nsmap = credentials[1]
+    url = credentials[2]
+    user = credentials[3]
+    password = credentials[4]
+        
+    try:
+        root = etree.parse(fp)
+    except:
+        print("Error parsing file. Check filename")
+        return
+    else:
 
-    if len(sys.argv) > 1:
-        fp = sys.argv[1]
-        print(f"\nFile Path: {fp}\n")
-        
-        try:
-            root = etree.parse(fp)
-        except:
-            print("Error parsing file. Check filename")
-            return
-        
         order = createOrder(root, nsmap, url, user, password)
-        
+    
         if len(outputFn) == 0:
             outputFn = order.getOutputFilename() + "_" + "Provide"
 
@@ -378,27 +473,23 @@ def outputFileRun(credentials, orderType, outputFn = ''):
                 print(f"\nOutput Filename: {outputFn}.xml")
                 file.write(etree.tostring(order.root))
 
-    else:
-       print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)") 
 
 def submitRun(credentials) -> createOrder:
-    nsmap = credentials[0]
-    url = credentials[1]
-    user = credentials[2]
-    password = credentials[3]
-
-    if len(sys.argv) > 1:
-        fp = sys.argv[1]
-        print(f"\nFile Path: {fp}\n")
+    fp = credentials[0]
+    nsmap = credentials[1]
+    url = credentials[2]
+    user = credentials[3]
+    password = credentials[4]
+    
         
-        try:
-            root = etree.parse(fp)
-        except:
-            print("Error parsing file. Check filename")
-            return
-        
+    try:
+        root = etree.parse(fp)
+    except:
+        print("Error parsing file. Check filename")
+        return
+    else:
         order = createOrder(root, nsmap, url, user, password)
-        order.replaceAll()
+        order.provide()
         order.submitOrder(url)
 
     return order
@@ -430,85 +521,268 @@ def ensureValidChoice(message, acceptRange) -> int:
             else:
                 print("Not a valid choice!")
 
+def ensureValidChoiceMultiple(message, acceptRange) -> int:
+    while True:
+        try:
+            print(message)
+            print("==================================================")
+            userInput = input(">> ")
+            if userInput == "":
+                return ""
+            
+            vals = userInput.split()
+            ret = []
+            for val in vals:
+                ret.append(int(val))
+            # val = int(userInput)
+
+        except ValueError:
+            print("\nNot a number")
+        
+        else:
+            for index, val in enumerate(ret):
+                if val in range(acceptRange + 1):
+                    if index == len(ret) - 1:
+                        return ret
+                    else:
+                        continue
+                else:
+                    print("Not a valid choice!")
+                    break
+
+
+def chooseEnv() -> string:
+    url = ""
+    # Get Desired Dev or QA Environment
+    envs = [("DEV 1", "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("DEV 4", "http://osmdev4-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("DEV 5", "http://osmdev5-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("QA 1", "http://osmqa1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("QA 4", "http://osmqa4.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("QA 5", "http://osmqa5.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi")]
+    
+    menu([e[0] for e in envs], firstCall=True)
+    env = ensureValidChoice("Select Desired Environment: ", len(envs))
+    if env == 0:
+        return -1
+    else:
+        url = envs[env - 1][1]
+    
+    print(f"Setting Endpoint to: {url}")
+    return url
+
 
 def options():
 
     nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
-    url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
+    url = ""
     user = "admin"
     password = "welcome1"
+    types = {1: "Provide", 2: "Change-Owner", 3: "Cease", 4: "Move (All)", 5: "Move (Select)"}
 
-    credentials = [nsmap, url, user, password]
-    types = {1: "Provide", 2: "Change-Owner"}
+    if len(sys.argv) > 1:
+        fp = sys.argv[1]
+        print(f"\nFile Path: {fp}")
+    else:
+       print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)")
+       return
+    
+    # Set credentials
+    credentials = [fp, nsmap, url, user, password]
 
 
-    choices = ["Singular", "Multiple"]
+    ############ MENU ############
+    
+    menu(["Replace All", "Replace Specific Values"], firstCall=True)
+    option = ensureValidChoice("Specific Value Change or Whole Order?: ", 2)
+    if option == 0:
+        return
+    elif option == 2:
+        individualFunctions(credentials)
+        return
+
+    url = chooseEnv()
+    if url == "" or None:
+        print("Error choosing environment")
+    elif url == -1:
+        return
+    credentials[2] = url # Replace URL
+
+
+    choices = ["OMS", "TOM"]
     menu(choices, firstCall=True)
-    pick = ensureValidChoice("Singular or Multiple Orders?: ", len(choices))
+    pick = ensureValidChoice("Which kind of order did you input?: ", len(choices))
 
     while pick != 0:
-        # print("In while")
+
+        # User picked OMS order (E2E)
         if pick == 1:
-            choices = ["Provide", "Change-Owneer"]
-            menu(choices)
-            orderTypeChoice = ensureValidChoice("What type of order?: ", len(choices))
-            orderType = types[orderTypeChoice]
-
-            choices = ["Output File(s)", "Submit"]
-            menu(choices)
-            ans = ensureValidChoice("Produce output file or submit the order?: ", len(choices))
-
-            if ans == 1:
-                filename = str(input("Enter Output Filename (Leave blank for generated filename or 0 to exit): "))
-                if filename == "0":
-                    continue
-
-                outputFileRun(credentials, orderType, filename)
-                break
-
-            elif ans == 2:
-                order: createOrder = submitRun(credentials)
-                if orderType != "Provide":
-                    print("\n==================================================")
-                    print("Secondary order will be written to file")
-                    outputFn = order.getOutputFilename()
-                    order.dispatcher[orderType]()
-                    writeToFile(outputFn, order)
-                break
-
-        elif pick == 2:
-            try: 
-                numOrders = int(input("Number of orders?: "))
-            except ValueError:
-                print("Not a number")
-            else:
-                
-                for i in range(numOrders):
-                    outputFileRun(credentials)
-                break
         
-        choices = ["Singular", "Multiple"]
+            choices = ["Singular", "Multiple"]
+            menu(choices)
+            pick = ensureValidChoice("Singular or Multiple Orders?: ", len(choices))
+
+            if pick == 1:
+                choices = ["Provide", "Change-Owneer", "Cease", "Move (All)", "Move (Select)"]
+                menu(choices)
+                orderTypeChoice = ensureValidChoice("What type of order?: ", len(choices))
+                orderType = types[orderTypeChoice]
+
+                choices = ["Output File(s)", "Submit"]
+                menu(choices)
+                ans = ensureValidChoice("Produce output file or submit the order?: ", len(choices))
+
+                if ans == 1:
+                    filename = str(input("Enter Output Filename (Leave blank for generated filename or 0 to exit): "))
+                    if filename == "0":
+                        continue
+
+                    outputFileRun(credentials, orderType, filename)
+                    break
+
+                elif ans == 2:
+                    order: createOrder = submitRun(credentials)
+                    if orderType != "Provide":
+                        print("\n==================================================")
+                        print("Secondary order will be written to file")
+                        outputFn = order.getOutputFilename()
+                        order.dispatcher[orderType]()
+                        writeToFile(outputFn, order)
+                    break
+
+            elif pick == 2:
+                try: 
+                    numOrders = int(input("Number of orders?: "))
+                except ValueError:
+                    print("Not a number")
+                else:
+                    
+                    for i in range(numOrders):
+                        outputFileRun(credentials)
+                    break
+        
+        # User picked TOM
+        else:
+            choices = ["Singular", "Multiple"]
+            menu(choices)
+            pick = ensureValidChoice("Singular or Multiple Orders?: ", len(choices))
+
+            if pick == 1:
+                choices = ["Output File(s)", "Submit"]
+                menu(choices)
+                ans = ensureValidChoice("Produce output file or submit the order?: ", len(choices))
+
+                if ans == 1:
+                    filename = str(input("Enter Output Filename (Leave blank for generated filename or 0 to exit): "))
+                    if filename == "0":
+                        continue
+
+                    outputFileRun(credentials, orderType, filename)
+                    break
+
+                elif ans == 2:
+                    order: createOrder = submitRun(credentials)
+                    break
+
+            elif pick == 2:
+                try: 
+                    numOrders = int(input("Number of orders?: "))
+                except ValueError:
+                    print("Not a number")
+                else:
+                    
+                    for i in range(numOrders):
+                        outputFileRun(credentials)
+                    break
+
+
+        choices = ["OMS", "TOM"]
         menu(choices, firstCall=True)
-        pick = ensureValidChoice("How many orders do you need?: ", len(choices))
+        pick = ensureValidChoice("Which kind of order did you input?: ", len(choices))
     
     return                
 
 
+def individualFunctions(credentials:list):
+    fp = credentials[0]
+    nsmap = credentials[1]
+    url = credentials[2]
+    user = credentials[3]
+    password = credentials[4]
+    
+    try:
+        root = etree.parse(fp)
+    except:
+        print("Error parsing file. Check filename")
+        return
+    else:
+        order = createOrder(root, nsmap, url, user, password)
+        dispatcher = {1: order.orderIdReplace, 2: order.samkeyReplace, 3: order.cbpReplace, 4: order.workIdReplace, 
+                      5: order.hhidReplace, 6: order.serialReplace, 7: order.macAddressReplace, 8: order.orderItemIdReplace}
+
+        while True:
+            choices = {1: "Order ID (Reference #)", 
+                       2: "Samkey", 
+                       3: "CBP", 
+                       4: "Work Order ID", 
+                       5: "HHID", 
+                       6: "Serial Number", 
+                       7: "Mac Address", 
+                       8: "Order Item IDs", 
+                       9: "Action Codes", 
+                       10: "Type Codes",
+                       11: "Product Instance IDs", }
+            
+
+            menu(choices.values(), firstCall=True)
+            pick = ensureValidChoice("What value would you like to replace?: ", len(choices))
+
+            if pick == 0:
+                break
+            else:
+                if pick >= 9:
+                    if pick == 9:
+                        print("Please provide the desired action code: ")
+                        value = input(">> ")
+                        order.changeActionCodes(order.root, value.capitalize())
+                    elif pick == 10:
+                        print("Please provide the desired type code: ")
+                        value = input(">> ")
+                        order.changeTypeCodes(order.root, value.capitalize())
+                    else:
+                        order.affectedProductReplace(root)
+                else:
+                    dispatcher[pick]()
+
+        outputfn = order.getOutputFilename()
+        writeToFile(outputfn, order)
+            
+        return
+
 def testing():
-    root = etree.parse("new_order.xml")
+
+    if len(sys.argv) > 1:
+        fp = sys.argv[1]
+        print(f"\nFile Path: {fp}\n")
+    else:
+       print("Please provide a valid filename as a command line argument (Ex. py generation.py order.xml)")
+       return
+
+    root = etree.parse(fp)
     nsmap={'x': 'http://www.w3.org/2001/XMLSchema-instance', 'ng': 'http://ngpp.fulfilment.services.rogers.com', 'a': 'http://fulfilment.services.cust.oms.amdocs.com'}
     url = "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"
     user = "admin"
     password = "welcome1"
     order = createOrder(root, nsmap, url, user, password)
 
-    order.changeOwner()
+    order.orderIdReplace()
+    order.changeActionCodes(order.root, "PR")
 
-    # outputFn = order.getOutputFilename()
+    outputFn = order.getOutputFilename()
 
-    # with open("%s.xml" % outputFn, 'wb') as file:
-    #     print(f"\nOutput Filename: {outputFn}.xml")
-    #     file.write(etree.tostring(order.root))
+    with open("%s.xml" % outputFn, 'wb') as file:
+        print(f"\nOutput Filename: {outputFn}.xml")
+        file.write(etree.tostring(order.root))
 
 # testing()
 options()
