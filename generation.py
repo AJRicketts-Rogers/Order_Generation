@@ -44,13 +44,17 @@ class createOrder:
         else:
             response_map = {'env': 'http://schemas.xmlsoap.org/soap/envelope/', 'n1': 'http://xmlns.oracle.com/communications/ordermanagement'}
             
-            success_response = etree.fromstring(response.text).xpath("//env:Envelope/env:Body//n1:Reference", namespaces = response_map)
+            success_response_reference = etree.fromstring(response.text).xpath("//env:Envelope/env:Body//n1:Reference", namespaces = response_map)
+            success_order_id = etree.fromstring(response.text).xpath("//env:Envelope/env:Body//n1:Id", namespaces = response_map)
+            success_order_type = etree.fromstring(response.text).xpath("//env:Envelope/env:Body//n1:Type", namespaces = response_map)
 
-            if len(success_response):
-                print(f"\n\nOrder Submitted!\nReference Number: {success_response[0].text}")
+            if success_response_reference and success_order_id and success_order_type:
+                print(f"\n\nOrder Submitted!\nReference Number: {success_response_reference[0].text}")
+                print(f"\n{success_order_type[0].text} order id: {success_order_id[0].text}")
 
             else:
-                print("Error submitting order and getting reference number, check reposnse output.")
+                print("Error submitting order and getting order information, check response output. ---->\n")
+                self.prettyprint(response.text)
 
 
     def getOutputFilename(self):
@@ -58,11 +62,18 @@ class createOrder:
         return f'order_{curTime}' # Change filename here.
 
     def prettyprint(self, elements, **kwargs):
-        for element in elements:
+        if isinstance(elements, str):
+        #     print("here")
+            element = etree.fromstring(elements)
             xml = etree.tostring(element, pretty_print=True, **kwargs)
             print(xml.decode(), end='')
-            print("\n\n")
+        
+        else:
+            for element in elements:
+                xml = etree.tostring(element, pretty_print=True, **kwargs)
+                print(xml.decode(), end='')
 
+        print("\n\n")
 
     def numberGen(self, n) -> int:
         range_start = 10 ** (n-1) 
@@ -89,19 +100,19 @@ class createOrder:
         if ishhid:
             cbp = self.getCBP()
             length -= len(cbp)
-            print("Length: ", length)
+            # print("Length: ", length)
             new_value = self.numberGen(length)
             for element in elements:
                 element.text = element.text[:1] + cbp + str(new_value) # Keep the letter (first character of the hhid) and replace all numbers after
                 count += 1
         else:
-            print("Length: ", length)
+            # print("Length: ", length)
             new_value = self.numberGen(length)
             for element in elements:
                 element.text = str(new_value)
                 count += 1
 
-        print(f"New {elementName} value: {elements[0].text}")
+        # print(f"New {elementName} value: {elements[0].text}")
         print("Number of values changed: ", count)
         print("\n")
         
@@ -180,11 +191,11 @@ class createOrder:
 
             for serial_number in serial_numbers:
                 length = len(serial_number.text)
-                print("Old value: ", serial_number.text)
+                # print("Old value: ", serial_number.text)
                 serial_number.text = self.id_generator(length) # If the value is 'NA' replace?
                 count += 1
                 
-                print("New value: ", serial_number.text)
+                # print("New value: ", serial_number.text)
 
             print(f"Number of values changed: {count}\n")
 
@@ -207,11 +218,11 @@ class createOrder:
 
             for mac_address in mac_addresses:
                 length = len(mac_address.text)
-                print("Old Mac value: ", mac_address.text)
+                # print("Old Mac value: ", mac_address.text)
                 mac_address.text = self.id_generator(length, isMac=True) # If the value is 'NA' replace?
                 count += 1
                 
-                print("New Mac value: ", mac_address.text)
+                # print("New Mac value: ", mac_address.text)
 
             print(f"Number of values changed: {count}\n")
 
@@ -230,11 +241,11 @@ class createOrder:
 
             if len(id) and len(ap_id):
                 new_id = self.numberGen(len(id[0].text))
-                print(f"Old Affected Product id: {id[0].text}")
+                # print(f"Old Affected Product id: {id[0].text}")
                 id[0].text = str(new_id)
                 ap_id_value = self.retrieveValues(ap_id)[0]
                 ap_id_value.text = str(new_id)
-                print(f"New Affected Product id: {new_id}\n")
+                # print(f"New Affected Product id: {new_id}\n")
 
 
     def orderItemIdReplace(self):
@@ -260,14 +271,14 @@ class createOrder:
                         if tag_name == "externalID":
                             # Key should not be empty due to our xpath query above so below should never throw an error
                             key = node.xpath("./a:key", namespaces = self.nsmap)
-                            print(f"Old Ref #: {key[0].text}")
+                            # print(f"Old Ref #: {key[0].text}")
                             key[0].text = new_oi_ref
 
                         else:
-                            print(f"Old Ref #: {node.text}")
+                            # print(f"Old Ref #: {node.text}")
                             node.text = new_oi_ref  
 
-                        print(f"New Ref #: {new_oi_ref}\n")
+                        # print(f"New Ref #: {new_oi_ref}\n")
 
                     old_OIRefs[str(old_oi_ref)] = element # Save the changed order items for use with dominant order items
 
@@ -284,18 +295,18 @@ class createOrder:
                     if value.text in matches:
                         replacement_ref = matches[value.text].xpath("a:orderItemReferenceNumber[normalize-space() != '']", namespaces = self.nsmap)
                         if len(replacement_ref):
-                            print(f"Associated_OA_ID Value before {value.text}")
+                            # print(f"Associated_OA_ID Value before {value.text}")
                             value.text = replacement_ref[0].text
-                            print(f"Associated_OA_ID Value After: {value.text}")
+                            # print(f"Associated_OA_ID Value After: {value.text}")
 
                 if len(dominant_id_keys):
                     for element in dominant_id_keys:
                         if element.text in matches:
                             replacement_ref = matches[element.text].xpath("a:orderItemReferenceNumber[normalize-space() != '']", namespaces = self.nsmap)
                             if len(replacement_ref):
-                                print(f"dominantOrderItem Key Value before {element.text}")
+                                # print(f"dominantOrderItem Key Value before {element.text}")
                                 element.text = replacement_ref[0].text
-                                print(f"dominantOrderItem Key Value After: {element.text}")
+                                # print(f"dominantOrderItem Key Value After: {element.text}")
 
             else:
                 print("Order XML Has no Associated OA Ids")
@@ -387,11 +398,11 @@ class createOrder:
 
                 if len(id) and len(ap_id):
                     new_id = self.numberGen(len(id[0].text))
-                    print(f"Old Affected Product id: {id[0].text}")
+                    # print(f"Old Affected Product id: {id[0].text}")
                     id[0].text = str(new_id)
                     ap_id_value = self.retrieveValues(ap_id)[0]
                     ap_id_value.text = str(new_id)
-                    print(f"New Affected Product id: {new_id}\n")
+                    # print(f"New Affected Product id: {new_id}\n")
 
     
     def changeActionCodes(self, element, action:string):
@@ -404,7 +415,7 @@ class createOrder:
                 actions.add(element.text)
                 print(element.text)
                 element.text = action
-            print(f"Action Codes changed from {actions} to {action_codes[0].text}")
+            # print(f"Action Codes changed from {actions} to {action_codes[0].text}")
 
     def changeTypeCodes(self, element, type:string):
         type_codes = element.xpath(".//a:type/a:code", namespaces = self.nsmap)
@@ -413,7 +424,7 @@ class createOrder:
 
             for element in type_codes:
                 element.text = type
-            print(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
+            # print(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
 
     def changeOrderType(self, element, action : string, type : string):
         self.changeActionCodes(element, action)
@@ -554,9 +565,9 @@ def ensureValidChoiceMultiple(message, acceptRange) -> int:
 def chooseEnv() -> string:
     url = ""
     # Get Desired Dev or QA Environment
-    envs = [("DEV 1", "http://osmdev1-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
-            ("DEV 4", "http://osmdev4-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
-            ("DEV 5", "http://osmdev5-z1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+    envs = [("DEV 1", "http://osmdev1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("DEV 4", "http://osmdev4.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
+            ("DEV 5", "http://osmdev5.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
             ("QA 1", "http://osmqa1.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
             ("QA 4", "http://osmqa4.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi"), 
             ("QA 5", "http://osmqa5.ngpp.mgmt.vf.rogers.com:7001/OrderManagement/wsapi")]
@@ -593,13 +604,29 @@ def options():
 
     ############ MENU ############
     
-    menu(["Replace All", "Replace Specific Values"], firstCall=True)
-    option = ensureValidChoice("Specific Value Change or Whole Order?: ", 2)
+    # TODO CLEAN ALL OF THIS UP
+    menu(["Replace All", "Replace Specific Values", "Submit Order"], firstCall=True)
+    option = ensureValidChoice("Specific Value Change or Whole Order?: ", 3)
     if option == 0:
         return
     elif option == 2:
         individualFunctions(credentials)
         return
+    elif option == 3:
+        url = chooseEnv()
+        if url == -1:
+            return
+        else:
+            credentials[2] = url
+            try:
+                root = etree.parse(fp)
+            except:
+                print("Error parsing file. Check filename")
+                return
+            else:
+                order = createOrder(root, nsmap, url, user, password)
+                order.submitOrder(url)
+                return
 
     url = chooseEnv()
     if url == "" or None:
@@ -656,10 +683,29 @@ def options():
                 except ValueError:
                     print("Not a number")
                 else:
-                    
-                    for i in range(numOrders):
-                        outputFileRun(credentials)
-                    break
+
+                    choices = ["Provide", "Change-Owneer", "Cease", "Move (All)", "Move (Select)"]
+                    menu(choices)
+                    orderTypeChoice = ensureValidChoice("What type of order?: ", len(choices))
+                    orderType = types[orderTypeChoice]
+
+                    choices = ["Output File(s)", "Submit"]
+                    menu(choices)
+                    ans = ensureValidChoice("Produce output file or submit the order?: ", len(choices))
+
+                    if ans == 1:
+                        filename = str(input("Enter Output Filename (Leave blank for generated filename or 0 to exit): "))
+                        if filename == "0":
+                            continue
+                        
+                        for _ in range(numOrders):
+                            outputFileRun(credentials, orderType, filename)
+                        break
+
+                    elif ans == 2:
+                        for _ in range(numOrders):
+                            order: createOrder = submitRun(credentials)
+                        break
         
         # User picked TOM
         else:
@@ -731,7 +777,8 @@ def individualFunctions(credentials:list):
                        8: "Order Item IDs", 
                        9: "Action Codes", 
                        10: "Type Codes",
-                       11: "Product Instance IDs", }
+                       11: "Product Instance IDs", 
+                       12: "Submit Order"}
             
 
             menu(choices.values(), firstCall=True)
@@ -749,8 +796,18 @@ def individualFunctions(credentials:list):
                         print("Please provide the desired type code: ")
                         value = input(">> ")
                         order.changeTypeCodes(order.root, value.capitalize())
-                    else:
+                    elif pick == 11:
                         order.affectedProductReplace(root)
+                    else:
+                        # TODO FIX THIS
+                        print("Are you done changing values? Are you sure you want to submit the order?: ")
+                        value = input("Y or N? >> ")
+                        if value.casefold() == "Y".casefold():
+                            url = chooseEnv()
+                            order.submitOrder(url)
+                            return
+                        else:
+                            continue
                 else:
                     dispatcher[pick]()
 
