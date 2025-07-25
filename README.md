@@ -4,17 +4,6 @@ This python3 script takes a OMS order as input and changes the required fields t
 
 ---
 
-## 🚀 Features
-
-* Generate or modify XML orders with randomized but valid identifiers.
-* Submit single or multiple orders to specified OSM endpoints.
-* Replace specific XML element values like Order ID, CBP, HHID, MAC address, and more.
-* Support for multiple order types including Provide, Change-Owner, Cease, Move (All), and Move (Select).
-* Batch submissions with configurable delays and durations.
-* Logging and pretty-printed XML output for debugging and auditing.
-
----
-
 ## 📦 Installation
 
 1. **Clone the repository:**
