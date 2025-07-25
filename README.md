@@ -68,6 +68,11 @@ Submits orders in parallel.
 #### `individualFunctions(credentials)`
 
 Allows the user to select which fields to change
+
+#### `dueDateReplace(root, nsmap)`
+
+Gets user input to change all due dates
+
 ---
 
 ### From `createOrder.py`

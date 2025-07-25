@@ -1,8 +1,10 @@
 from lxml import etree
 from random import randint, choice
-import string, requests, sys, datetime, os, base64, time, copy, logging
+import string, sys, time, logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from createOrder import createOrder
+from datetime import datetime, timedelta, timezone
+from dateutil import parser
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +144,52 @@ def chooseOrderType(serverTest=False):
 
     return [ans, orderType]
 
+def dueDateReplace(root, nsmap) -> None:
+    menu(["Yes", "No"])
+    changeDueDates  = ensureValidChoice("Change Due Dates?: ", 2)
+    if changeDueDates != 1:
+        return
+
+    dates = root.xpath("//a:orderItems/a:dueDate | //a:affectedProduct/a:effectiveDate | //a:orderItems/a:serviceRequiredDate", namespaces = nsmap)
+    if len(dates):
+        initial_date = dates[0]
+        
+        # ISO 8601 datetime string with timezone
+        dt_str = initial_date.text
+
+        # Parse into aware datetime object
+        dt_obj = parser.isoparse(dt_str)
+
+        # Ask user for new time
+        minutes_input = input("Enter the amount of minutes you would like to add or subtract ('-' to subtract): ")
+        try:
+            minutes_change = int(minutes_input)
+        except ValueError:
+            logger.info("Error, please input a valid number")
+        else:
+            new_dt = dt_obj + timedelta(minutes=minutes_change)
+            
+            fulfillment_options = root.xpath("//a:affectedProduct/a:characteristicValues[a:name[text()='Fulfillment_Options']]", namespaces = nsmap)
+            now = datetime.now().astimezone()
+            new_val = "Error"
+
+            for option in fulfillment_options:
+                value = option.xpath("./a:value", namespaces = nsmap)
+                if new_dt > now:
+                    value[0].text = "NN"
+                else:
+                    value[0].text = "IM"
+                
+                new_val = value[0].text
+            
+            logger.debug("\tFulfillment Options changed to: %s", new_val)
+
+            new_dt_str = new_dt.isoformat()
+
+            for date in dates:
+                date.text = new_dt_str
+
+            logger.debug("\tDue dates changed from %s to %s\n", dt_str, new_dt_str)
 
 def submitMultiple(credentials, numOrders, orderType):
     try: 
@@ -232,11 +280,13 @@ def options(nsmap, user, password):
         individualFunctions(credentials)
         return
     elif option == 3:
+        dueDateReplace(root, nsmap)
         order = createOrder(root, nsmap, url, user, password, logger)
         order.submitOrder(url)
         return
             
     elif option == 4:
+        dueDateReplace(root, nsmap)
         orderTypeAns = chooseOrderType(serverTest=True)
         ans = orderTypeAns[0]
         orderType = orderTypeAns[1]
@@ -273,7 +323,7 @@ def options(nsmap, user, password):
 
                     if pick == 1:
                         while True:
-
+                            dueDateReplace(root, nsmap)
                             orderTypeAns = chooseOrderType()
                             ans = orderTypeAns[0]
                             orderType = orderTypeAns[1]
@@ -307,6 +357,7 @@ def options(nsmap, user, password):
                         else:
 
                             while True:
+                                dueDateReplace(root, nsmap)
                                 orderTypeAns = chooseOrderType()
                                 ans = orderTypeAns[0]
                                 orderType = orderTypeAns[1]
@@ -390,11 +441,12 @@ def individualFunctions(credentials:list):
                     5: "HHID", 
                     6: "Serial Number", 
                     7: "Mac Address", 
-                    8: "Order Item IDs", 
-                    9: "Action Codes", 
-                    10: "Type Codes",
-                    11: "Product Instance IDs", 
-                    12: "Submit Order"}
+                    8: "Order Item IDs",
+                    9: "Due Dates", 
+                    10: "Action Codes", 
+                    11: "Type Codes",
+                    12: "Product Instance IDs", 
+                    13: "Submit Order"}
         
 
         menu(choices.values(), firstCall=True)
@@ -405,14 +457,16 @@ def individualFunctions(credentials:list):
         else:
             if pick >= 9:
                 if pick == 9:
+                    dueDateReplace(root, nsmap)
+                elif pick == 10:
                     print("Please provide the desired action code: ")
                     value = input(">> ")
                     order.changeActionCodes(order.root, value.capitalize())
-                elif pick == 10:
+                elif pick == 11:
                     print("Please provide the desired type code: ")
                     value = input(">> ")
                     order.changeTypeCodes(order.root, value.capitalize())
-                elif pick == 11:
+                elif pick == 12:
                     order.affectedProductReplace(root)
                 else:
                     # TODO FIX THIS
