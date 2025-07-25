@@ -2,10 +2,8 @@ from lxml import etree
 from random import randint, choice
 import string, requests, datetime, base64, time, copy, logging
 
-logger = logging.getLogger(__name__)
-
 class createOrder:
-    def __init__(self, root, nsmap, url, user, password):
+    def __init__(self, root, nsmap, url, user, password, logger):
         self.root = root
         self.nsmap = nsmap
         self.url = url
@@ -13,7 +11,8 @@ class createOrder:
         self.reference_number = ''
         self.batch = 1
         self.response = None
-        self.dispatcher = {"Provide": self.replaceAll, "Change-Owner": self.changeOwner, "Cease": self.cease, "Move (All)": self.moveAll, "Move (Select)": self.moveSelect}
+        self.logger = logger
+        self.dispatcher = {"Provide": self.provide, "Change-Owner": self.changeOwner, "Cease": self.cease, "Move (All)": self.moveAll, "Move (Select)": self.moveSelect}
 
     def submitOrder(self, url, user = 'admin', password = 'welcome1'):
 
@@ -39,14 +38,14 @@ class createOrder:
         """
 
         try:
-            logger.info("Attempting to submit the order.....\n")
+            self.logger.info("Attempting to submit the order.....\n")
             response = requests.post(url,data=body,headers=headers)
             self.response = response
-            print(response.text)
+            self.logger.debug(response.text)
             content_type = response.headers.get('Content-Type', '')
 
         except requests.exceptions.RequestException as e:
-            logger.error("\nError:")
+            self.logger.error("\nError:")
             raise SystemExit(e)
         
         else:
@@ -63,19 +62,19 @@ class createOrder:
 
                 if success_response_reference and success_order_id and success_order_type and success_version_number:
                     self.reference_number = success_response_reference[0].text
-                    logger.info(f"Order Submitted!\nReference Number: {self.reference_number}\n\n")
-                    logger.debug(f"{success_order_type[0].text} order id: {success_order_id[0].text}\n")
-                    logger.info(f"Cartridge Version Number: {success_version_number[0].text}\n")
+                    self.logger.info(f"Order Submitted!\nReference Number: {self.reference_number}\n\n")
+                    self.logger.debug(f"{success_order_type[0].text} order id: {success_order_id[0].text}\n")
+                    self.logger.info(f"Cartridge Version Number: {success_version_number[0].text}\n")
                 
                 else:
                     failed = True
 
             if failed:
-                logger.error("\tError submitting order and getting order information, check response output. ---->\n")
+                self.logger.error("\tError submitting order and getting order information, check response output. ---->\n")
                 self.reference_number = "Error"
                 
                 if 'text/html' in content_type:
-                    logger.info(response.text)
+                    self.logger.info(response.text)
                 else:
                     self.prettyprint(response.text)
 
@@ -119,7 +118,7 @@ class createOrder:
         ishhid = False if elements[0].text[:1].isnumeric() else True
         count = 0
 
-        logger.debug(f"Old {elementName} value: {elements[0].text}")
+        self.logger.debug(f"Old {elementName} value: {elements[0].text}")
         if ishhid:
             cbp = self.getCBP()
             length -= len(cbp)
@@ -135,10 +134,10 @@ class createOrder:
                 element.text = str(new_value)
                 count += 1
 
-        logger.debug(f"New {elementName} value: {elements[0].text}")
+        self.logger.debug(f"New {elementName} value: {elements[0].text}")
 
-        logger.debug("\tNumber of values changed: %s", count)
-        logger.debug("\n")
+        self.logger.debug("\tNumber of values changed: %s", count)
+        self.logger.debug("\n")
         
     def getCBP(self):
         return self.root.xpath("//a:customer/a:Id[text()]", namespaces = self.nsmap)[0].text
@@ -201,7 +200,7 @@ class createOrder:
         serial_parent = self.root.xpath("//a:characteristicValues[a:name[text()='Serial_Number'] and a:value[normalize-space() != '']]", namespaces = self.nsmap)
         count = 0
 
-        logger.debug("========== Serial Number Replacement ==========\n")
+        self.logger.debug("========== Serial Number Replacement ==========\n")
 
         # self.prettyprint(serial_parent)
         if len(serial_parent):
@@ -209,7 +208,7 @@ class createOrder:
             for element in serial_parent:
                 vals_to_change.append(element.xpath("./a:name", namespaces = self.nsmap)[0].text)
 
-            logger.debug(f"\tElement Values to Change: {vals_to_change}\n")
+            self.logger.debug(f"\tElement Values to Change: {vals_to_change}\n")
 
             serial_numbers = self.retrieveValues(serial_parent)
 
@@ -219,16 +218,16 @@ class createOrder:
                 serial_number.text = self.id_generator(length) # If the value is 'NA' replace?
                 count += 1
                 
-                # print("New value: ", serial_number.text)
+            self.logger.debug("\tNew value: %s\n", serial_number.text)
 
-            logger.debug(f"\tNumber of values changed: {count}\n")
+            self.logger.debug(f"\tNumber of values changed: {count}\n")
 
     def macAddressReplace(self) -> None:
         mac_parent = self.root.xpath("//a:characteristicValues[a:name[contains(text(), ('MAC_Address')) or contains(text(), ('Mac_Address'))]" 
                                 + " and a:value[normalize-space() != '']]", namespaces = self.nsmap)
         count = 0
 
-        logger.debug("========== Mac Address Replacement ==========")
+        self.logger.debug("========== Mac Address Replacement ==========")
 
         if len(mac_parent):
             vals_to_change = []
@@ -236,7 +235,7 @@ class createOrder:
             for element in mac_parent:
                 vals_to_change.append(element.xpath("./a:name", namespaces = self.nsmap)[0].text)
 
-            logger.debug(f"\tElement Values to Change: {vals_to_change}\n")
+            self.logger.debug(f"\tElement Values to Change: {vals_to_change}\n")
 
             mac_addresses = self.retrieveValues(mac_parent)
 
@@ -246,9 +245,9 @@ class createOrder:
                 mac_address.text = self.id_generator(length, isMac=True) # If the value is 'NA' replace?
                 count += 1
                 
-                # print("New Mac value: ", mac_address.text)
+                self.logger.debug("\tNew Mac value: %s\n", mac_address.text)
 
-            logger.debug(f"\tNumber of values changed: {count}\n")
+            self.logger.debug(f"\tNumber of values changed: {count}\n")
 
     def affectedProductReplace(self, start_element) -> None:
         # TODO FUTURE FUNCTIONALITY Change all REF_AP's and roleRecievers as well
@@ -256,7 +255,7 @@ class createOrder:
         # What about REF_AP_ID??
 
         ap_parent = start_element.xpath(".//a:affectedProduct", namespaces = self.nsmap)
-        logger.debug("========== Affected Product ID Replacement ==========\n")
+        self.logger.debug("========== Affected Product ID Replacement ==========\n")
 
         # Change both affected product id and APID value to the same number for each affectd product
         for element in ap_parent:
@@ -265,15 +264,15 @@ class createOrder:
 
             if len(id) and len(ap_id):
                 new_id = self.numberGen(len(id[0].text))
-                # logger.debug(f"Old Affected Product id: {id[0].text}")
+                # self.logger.debug(f"Old Affected Product id: {id[0].text}")
                 id[0].text = str(new_id)
                 ap_id_value = self.retrieveValues(ap_id)[0]
                 ap_id_value.text = str(new_id)
-                # logger.debug(f"New Affected Product id: {new_id}\n")
+                # self.logger.debug(f"New Affected Product id: {new_id}\n")
 
 
     def orderItemIdReplace(self):
-        logger.debug("========== Order Item Reference Number Replacement ==========")
+        self.logger.debug("========== Order Item Reference Number Replacement ==========")
         orderItems = self.root.xpath("//a:orderItems", namespaces = self.nsmap)
         old_OIRefs = {}
         if len(orderItems):
@@ -294,19 +293,19 @@ class createOrder:
                         if tag_name == "externalID":
                             # Key should not be empty due to our xpath query above so below should never throw an error
                             key = node.xpath("./a:key", namespaces = self.nsmap)
-                            # print(f"Old Ref #: {key[0].text}")
+                            # self.logger.debug(f"Old Ref #: {key[0].text}")
                             key[0].text = new_oi_ref
 
                         else:
-                            # print(f"Old Ref #: {node.text}")
+                            # self.logger.debug(f"Old Ref #: {node.text}")
                             node.text = new_oi_ref  
 
-                        # print(f"New Ref #: {new_oi_ref}\n")
+                        # self.logger.debug(f"New Ref #: {new_oi_ref}\n")
 
                     old_OIRefs[str(old_oi_ref)] = element # Save the changed order items for use with dominant order items
 
                 else:
-                    logger.error("\tERROR, Could not find order item reference number for the current order item, check order xml formatting.")
+                    self.logger.error("\tERROR, Could not find order item reference number for the current order item, check order xml formatting.")
     
         def dominantOrderItemReplace(self, matches):
             associated_ids = self.root.xpath("//a:RBTCharacteristics[a:name[text()='Associated_OA_ID'] and a:value[normalize-space() != '']]", namespaces = self.nsmap)
@@ -318,21 +317,21 @@ class createOrder:
                     if value.text in matches:
                         replacement_ref = matches[value.text].xpath("a:orderItemReferenceNumber[normalize-space() != '']", namespaces = self.nsmap)
                         if len(replacement_ref):
-                            # logger.debug(f"Associated_OA_ID Value before {value.text}")
+                            self.logger.debug(f"Associated_OA_ID Value before {value.text}")
                             value.text = replacement_ref[0].text
-                            # logger.debug(f"Associated_OA_ID Value After: {value.text}")
+                            self.logger.debug(f"Associated_OA_ID Value After: {value.text}")
 
                 if len(dominant_id_keys):
                     for element in dominant_id_keys:
                         if element.text in matches:
                             replacement_ref = matches[element.text].xpath("a:orderItemReferenceNumber[normalize-space() != '']", namespaces = self.nsmap)
                             if len(replacement_ref):
-                                # logger.debug(f"dominantOrderItem Key Value before {element.text}")
+                                self.logger.debug(f"dominantOrderItem Key Value before {element.text}")
                                 element.text = replacement_ref[0].text
-                                # logger.debug(f"dominantOrderItem Key Value After: {element.text}")
+                                self.logger.debug(f"dominantOrderItem Key Value After: {element.text}")
 
             else:
-                logger.error("\tOrder XML Has no Associated OA Ids")
+                self.logger.error("\tOrder XML Has no Associated OA Ids")
 
         dominantOrderItemReplace(self, old_OIRefs)
 
@@ -351,7 +350,7 @@ class createOrder:
         self.cbpReplace()
 
     def moveAll(self):
-        logger.debug("========== Move Scenario ==========\n")
+        self.logger.debug("========== Move Scenario ==========\n")
         self.changeOrderType(self.root, action = "CM", type = "CM")
         order_items = self.root.xpath("//a:ProductOrder/a:orderItems", namespaces = self.nsmap)
 
@@ -365,7 +364,7 @@ class createOrder:
     def moveSelect(self):
         self.changeOrderType(self.root, action = "CM", type = "CM")
 
-        logger.debug("========== Move Scenario ==========\n")
+        self.logger.debug("========== Move Scenario ==========\n")
         
         order_items = self.root.xpath("//a:ProductOrder/a:orderItems", namespaces = self.nsmap)
         line_item_elements = {}
@@ -399,7 +398,7 @@ class createOrder:
             for element in line_item_elements.values():
                 selection = element
         elif 0 in items_to_move:
-            logger.debug("\tthey want to go back")
+            self.logger.debug("\tthey want to go back")
         else:
             for index in items_to_move:
                 # line_items_elements is a key value pair of line item names (strings) as keys and <Element> objects as values
@@ -411,7 +410,7 @@ class createOrder:
         # Change both affected product id and APID value to the same number for each affectd product
         for name in selection:
             xpath_string = f"//a:affectedProduct[a:productSpec/a:code[text()='{name}']]"
-            logger.debug(xpath_string)
+            self.logger.debug(xpath_string)
             affected_product = self.root.xpath(xpath_string, namespaces = self.nsmap)
             if len(affected_product):
                 parent = affected_product[0].xpath("..", namespaces = self.nsmap)
@@ -422,11 +421,13 @@ class createOrder:
 
                 if len(id) and len(ap_id):
                     new_id = self.numberGen(len(id[0].text))
-                    # print(f"Old Affected Product id: {id[0].text}")
+                    self.logger.debug(f"Old Affected Product id: {id[0].text}")
+                    
                     id[0].text = str(new_id)
                     ap_id_value = self.retrieveValues(ap_id)[0]
                     ap_id_value.text = str(new_id)
-                    # print(f"New Affected Product id: {new_id}\n")
+                    
+                    self.logger.debug(f"New Affected Product id: {new_id}\n")
 
     
     def changeActionCodes(self, element, action:string):
@@ -439,7 +440,7 @@ class createOrder:
                 actions.add(element.text)
                 element.text = action
 
-            # logger.debug(f"Action Codes changed from {actions} to {action_codes[0].text}")
+            self.logger.debug(f"Action Codes changed from {actions} to {action_codes[0].text}")
 
     def changeTypeCodes(self, element, type:string):
         type_codes = element.xpath(".//a:type/a:code", namespaces = self.nsmap)
@@ -448,7 +449,7 @@ class createOrder:
 
             for element in type_codes:
                 element.text = type
-            # logger.debug(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
+            self.logger.debug(f"Type Codes changed from {oldTypes} to {type_codes[0].text}")
 
     def changeOrderType(self, element, action : string, type : string):
         self.changeActionCodes(element, action)
@@ -464,8 +465,7 @@ class createOrder:
         self.macAddressReplace()
         self.affectedProductReplace(self.root)
         self.orderItemIdReplace()
-        # self.provide()
-        logger.debug("Values Replaced!\n")
+        self.logger.debug("Values Replaced!\n")
 
 
 def ensureValidChoiceMultiple(message, acceptRange) -> int:
