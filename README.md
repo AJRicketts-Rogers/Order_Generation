@@ -14,12 +14,15 @@ This python3 script takes a OMS order as input and changes the required fields t
    ```
 
 2. **Install the dependencies:**
+   
+   Ensure you have Python 3.10.11 to avoid issues with lxml installation.
 
-   Make sure you have the latest Microsoft C++ Build Tools installed before running the following command as this is a lxml dependency
+   Otherwise, if installation issues with lxml, make sure you have the latest Microsoft C++ Build Tools installed before running the following command as this is a lxml dependency
    ```https://visualstudio.microsoft.com/visual-cpp-build-tools/```
 
    See this post for installation instructions
    ```https://stackoverflow.com/questions/64261546/how-to-solve-error-microsoft-visual-c-14-0-or-greater-is-required-when-inst```
+
 
    ```bash
    pip install -r requirements.txt
@@ -39,6 +42,8 @@ This python3 script takes a OMS order as input and changes the required fields t
 
 ```bash
 python generation.py your_order_file.xml
+                OR
+py generation.py your_order_file.xml
 ```
 
 You'll be prompted through a series of menus

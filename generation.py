@@ -1,3 +1,4 @@
+from zoneinfo import ZoneInfo
 from lxml import etree
 from random import randint, choice
 import string, sys, time, logging
@@ -161,6 +162,7 @@ def dueDateReplace(root, nsmap) -> None:
         dt_obj = parser.isoparse(dt_str)
 
         # Ask user for new time
+        logger.info(f"Current date in the XML = {dt_str}\n")
         minutes_input = input("Enter the amount of minutes you would like to add or subtract ('-' to subtract): ")
         try:
             minutes_change = int(minutes_input)
@@ -170,7 +172,7 @@ def dueDateReplace(root, nsmap) -> None:
             new_dt = dt_obj + timedelta(minutes=minutes_change)
             
             fulfillment_options = root.xpath("//a:affectedProduct/a:characteristicValues[a:name[text()='Fulfillment_Options']]", namespaces = nsmap)
-            now = datetime.now().astimezone()
+            now = datetime.now(ZoneInfo("America/New_York"))
             new_val = "Error"
 
             for option in fulfillment_options:
