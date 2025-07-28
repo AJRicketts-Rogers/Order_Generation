@@ -163,35 +163,38 @@ def dueDateReplace(root, nsmap) -> None:
 
         # Ask user for new time
         logger.info(f"Current date in the XML = {dt_str}\n")
-        minutes_input = input("Enter the amount of minutes you would like to add or subtract ('-' to subtract): ")
-        try:
-            minutes_change = int(minutes_input)
-        except ValueError:
-            logger.info("Error, please input a valid number")
-        else:
-            new_dt = dt_obj + timedelta(minutes=minutes_change)
-            
-            fulfillment_options = root.xpath("//a:affectedProduct/a:characteristicValues[a:name[text()='Fulfillment_Options']]", namespaces = nsmap)
-            now = datetime.now(ZoneInfo("America/New_York"))
-            new_val = "Error"
-
-            for option in fulfillment_options:
-                value = option.xpath("./a:value", namespaces = nsmap)
-                if new_dt > now:
-                    value[0].text = "NN"
-                else:
-                    value[0].text = "IM"
+        while True:
+            try:
+                date_input = input("Enter your desired date time (in the above format): ")
+                format_string = "%Y-%m-%dT%H:%M:%S.%f%z"
+                new_date = parser.isoparse(date_input)
+            except ValueError:
+                logger.info("Error, please input a valid date time in the following format: YYYY-MM-DDTHR:MN:SC.000-04:00 ")
+                continue
+            else:
                 
-                new_val = value[0].text
-            
-            logger.debug("\tFulfillment Options changed to: %s", new_val)
+                fulfillment_options = root.xpath("//a:affectedProduct/a:characteristicValues[a:name[text()='Fulfillment_Options']]", namespaces = nsmap)
+                now = datetime.now(ZoneInfo("America/New_York"))
+                new_val = "Error"
 
-            new_dt_str = new_dt.isoformat()
+                for option in fulfillment_options:
+                    value = option.xpath("./a:value", namespaces = nsmap)
+                    if new_date > now:
+                        value[0].text = "NN"
+                    else:
+                        value[0].text = "IM"
+                    
+                    new_val = value[0].text
+                
+                logger.debug("\tFulfillment Options changed to: %s", new_val)
 
-            for date in dates:
-                date.text = new_dt_str
+                new_dt_str = new_date.isoformat()
 
-            logger.debug("\tDue dates changed from %s to %s\n", dt_str, new_dt_str)
+                for date in dates:
+                    date.text = new_dt_str
+
+                logger.debug("\tDue dates changed from %s to %s\n", dt_str, new_dt_str)
+                break
 
 def submitMultiple(credentials, numOrders, orderType):
     try: 
